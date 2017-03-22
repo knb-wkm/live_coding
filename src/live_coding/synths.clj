@@ -1,3 +1,5 @@
+(ns live-coding.core)
+
 (definst simple-flute [freq 880
                        amp 0.5
                        attack 0.4
@@ -36,10 +38,11 @@
 (definst ping
   [note   {:default 72   :min 0     :max 120 :step 1}
    attack {:default 0.02 :min 0.001 :max 1   :step 0.001}
-   decay  {:default 0.3  :min 0.001 :max 1   :step 0.001}]
+   decay  {:default 0.3  :min 0.001 :max 1   :step 0.001}
+   amp 0.8]
   (let [snd (sin-osc (midicps note))
         env (env-gen (perc attack decay) :action FREE)]
-    (* 0.8 env snd)))
+    (* amp env snd)))
 
 (definst tb303
   [note       {:default 60 :min 0 :max 120 :step 1}
@@ -237,6 +240,51 @@
         zout (comb-n src :decay-time 4)]
     zout))
 
+(definst violin
+  [pitch   {:default 60  :min 0   :max 127 :step 1}
+   amp     {:default 1.0 :min 0.0 :max 1.0 :step 0.01}
+   gate    {:default 1   :min 0   :max 1   :step 1}
+   out-bus {:default 0   :min 0   :max 127 :step 1}
+   release 3]
+  
+  (let [freq   (midicps pitch)
+        ;; 3b) portamento to change frequency slowly
+        freqp  (slew:kr freq 100.0 100.0)
+        ;; 3a) vibrato to make it seem "real"
+        freqv  (vibrato :freq freqp :rate 6 :depth 0.02 :delay 1)
+        ;; 1) the main osc for the violin
+        saw    (saw freqv)
+        ;; 2) add an envelope for "bowing"
+        saw0   (* saw (env-gen (adsr 1.5 1.5 0.8 1.5) :gate gate :action FREE))
+        ;; a low-pass filter prior to our filter bank
+        saw1   (lpf saw0 4000) ;; freq???
+        ;; 4) the "formant" filters
+        band1  (bpf saw1 300 (/ 3.5))
+        band2  (bpf saw1 700 (/ 3.5))
+        band3  (bpf saw1 3000 (/ 2))
+        saw2   (+ band1 band2 band3)
+        ;; a high-pass filter on the way out
+        saw3   (hpf saw2 30)
+        env   (env-gen (perc 0.01 release))]
+    ;; (out out-bus (pan2 (* amp saw3)))))
+    (* amp (* env saw3))))
+
+(definst telmin1 [amp 0.7]
+  (* amp
+     (mix (sin-osc [(mouse-x 100 400 EXP)
+                    (mouse-x 200 500 EXP)
+                    (mouse-y 400 600 EXP)
+                    (mouse-y 500 700 EXP)]))))
+
+
+(definst random-sin [amp 1 release 10]
+  (let [wave (sin-osc (+ 1000 (* 1600 (lf-noise0:kr 12))))
+        env (env-gen (perc 0.1 release))]
+
+    (* amp (* env wave))
+))
+  
+
 ; // Originally from the STK instrument models...
 (comment definst bowed
   [note 60 velocity 80 gate 1 amp 1
@@ -280,128 +328,4 @@
     (local-out boredelay)
     (* 0.3 boredelay amp nenv)))
 
-; SynthDef(\flute, { arg out=0, gate=1, freq=440, amp=1.0, endReflection=0.5, jetReflection=0.5, jetRatio=0.32, noiseGain=0.15, vibFreq=5.925, vibGain=0.0, outputGain=1.0;
-;
-;   var nenv = EnvGen.ar(Env.linen(0.2, 0.03, 0.5, 0.5), gate, doneAction: 2);
-;   var adsr = (amp*0.2) + EnvGen.ar(Env.adsr(0.005, 0.01, 1.1, 0.01), gate, doneAction: 2);
-;   var noise = WhiteNoise.ar(noiseGain);
-;   var vibrato = SinOsc.ar(vibFreq, 0, vibGain);
-;
-;   var delay = (freq*0.66666).reciprocal;
-;   var lastOut = LocalIn.ar(1);
-;   var breathPressure = adsr*Mix([1.0, noise, vibrato]);
-;   var filter = LeakDC.ar(OnePole.ar(lastOut.neg, 0.7));
-;   var pressureDiff = breathPressure - (jetReflection*filter);
-;   var jetDelay = DelayL.ar(pressureDiff, 0.025, delay*jetRatio);
-;   var jet = (jetDelay * (jetDelay.squared - 1.0)).clip2(1.0);
-;   var boreDelay = DelayL.ar(jet + (endReflection*filter), 0.05, delay);
-;   LocalOut.ar(boreDelay);
-;   Out.ar(out, 0.3*boreDelay*outputGain*nenv);
-; }).store;
-;
-; s = Synth("flute", ["freq", 220]);
-; s.set("gate", 0);
-;
-; SynthDef(\blowbotl, { arg out=0, amp=1.0, freq=440, rq=0.0, gate=1, noise=0.0, vibFreq=5.2, vibGain=0.0;
-;   var lastOut = LocalIn.ar(1);
-;   var adsr = amp*EnvGen.ar(Env.adsr(0.005, 0.01, 1.0, 0.010), gate, doneAction: 2);
-;   var vibrato = SinOsc.ar(vibFreq, 0, vibGain);
-;   var pressureDiff = (adsr+vibrato) - lastOut;
-;   var jet = (pressureDiff * (pressureDiff.squared - 1.0)).clip2(1.0);
-;   var randPressure = WhiteNoise.ar(noise)*adsr*(1.0 + pressureDiff);
-;
-;   var resonator = Resonz.ar(adsr+randPressure - (jet*pressureDiff), freq, rq);
-;   LocalOut.ar(resonator);
-;   Out.ar(out, LeakDC.ar(resonator));
-; }).store
-;
-; f = Synth(\blowbotl);
-; f.set("freq", 100);
-; f.free;
 
-; SynthDef(\voicform, { arg out=0, gate=1, freq=440, amp=0.3, voiceGain=1.0, noiseGain=0.0, sweepRate=0.001;
-;
-;   var voiced = Pulse.ar(freq, 0.1, voiceGain);
-;   var onezero = OneZero.ar(voiced, -0.9);
-;   var onepole = OnePole.ar(onezero, 0.97 - (amp*0.2));
-;   var noise = WhiteNoise.ar(noiseGain*0.1);
-;   var excitation = onepole + noise;
-;
-;   var ffreqs = Control.names([\ffreq]).kr([770, 1153, 2450, 3140]);
-;   var fradii = Control.names([\bw]).kr([0.950, 0.970, 0.780, 0.8]);
-;   var famps = Control.names([\gain]).kr([1.0, 0.355, 0.0355, 0.011]);
-;
-;   var filters = TwoPole.ar(excitation, Lag.kr(ffreqs, sweepRate), Lag.kr(fradii, sweepRate), Lag.kr(famps, sweepRate) );
-;
-;   Out.ar(out, amp*Mix(filters) );
-; }).store;
-;
-; v = Synth(\voicform, target: s)
-; v.set("freq", 100);
-; v.free;
-
-
-; SynthDef.new("mcldjospiano1", { | out = 0, freq = 440, gate = 1,
-; amp=0.1, pan = 0|
-;         var impresp, imps, dels, hammerstr, velocity, string, ampcomp,
-; pldelay, cutoff;
-;         velocity = Latch.kr(gate, gate);
-;
-;         cutoff = EnvGen.kr(Env.asr(0.00001, 1, 0.2, curve: -4), gate,
-; doneAction: 2) * 15000 + 30;
-;
-;         // We start off by appromixating the piano's impulse response.
-;         impresp = WhiteNoise.ar(1, 0, EnvGen.ar(Env.perc(0.02, 0.02)));
-;         impresp = LPF.ar(impresp, freq.expexp(50, 1000, 10000, 500));
-;         // FreeVerb is NOT a piano soundboard impulse response! Just a standin
-;         impresp = FreeVerb.ar(impresp, 0.8, freq.linlin(300, 600, 0.1, 0.9),
-; freq.linlin(300, 600, 0.19, 0.01));
-;         impresp = LeakDC.ar(impresp);
-;
-;         // Then we simulate the multiple strikes of the hammer
-; against the string
-;         dels = #[0.002, 0.006, 0.009] * freq.explin(100, 1000, 1, 0.01);
-;         imps = DelayN.ar(impresp, dels, dels, #[0.85, 0.32, 0.22]);
-;         // Note: at higher velocity, the LPF goes higher, making the
-; hammer hits more pointy & separate
-;         imps = LPF.ar(imps, freq * 2 * #[1, 1.5, 1.5] * velocity * 2, mul: 8);
-;         hammerstr = imps.sum;
-;
-;         // Now push the sound into Pluck, to simulate the string vibration
-;         pldelay = (freq * [Rand(0.999, 0.9995), 1, Rand(1.00005,
-; 1.001)]).reciprocal;
-;         string = Pluck.ar(hammerstr, Impulse.kr(0.000001), pldelay,
-; pldelay, 10.5, 0.4);
-;         string = LeakDC.ar(string).sum;
-;
-;         // patch gives un-piano-like amplitude variation across
-; pitch; let's compensate
-;         ampcomp = freq.max(350).min(1000).linlin(350, 1000, 1, 60);
-;         string = string * ampcomp;
-;
-;         // filter is to damp the string when the note stops
-;         string = LPF.ar(string, cutoff);
-;
-;         Out.ar(out, Pan2.ar(string, pan, (amp * 10)));
-; }).store;
-;
-;
-; SynthDef(\piano, { arg outBus, freq, amp, dur, pan;
-;         var sig, in, n = 6, max = 0.04, min = 0.01, delay, pitch, detune, hammer;
-;         hammer = Decay2.ar(Impulse.ar(0.001), 0.008, 0.04,
-;             LFNoise2.ar([2000,4000].asSpec.map(amp), 0.25));
-;         sig = Mix.ar(Array.fill(3, { arg i;
-;                 detune = #[-0.04, 0, 0.03].at(i);
-;                 delay = (1/(freq + detune).midicps);
-;                 CombL.ar(hammer, delay, delay, 50 * amp) +
-;                 SinOsc.ar(
-;                     [(freq * 2) + SinOsc.kr(2, Rand(0, 1.0), 4),
-;                     freq * [4.23, 6.5]].flat ,
-;                     0,
-;                     amp * [0.1, 0.25, 0.3]).sum
-;                 }) );
-;
-;
-;         sig = HPF.ar(sig,50) * EnvGen.ar(Env.perc(0.0001,dur, amp, -1), doneAction:2);
-;         Out.ar(outBus, Pan2.ar(sig,pan));
-; }).send(s);

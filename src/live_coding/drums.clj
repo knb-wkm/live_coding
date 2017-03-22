@@ -1,4 +1,5 @@
-;; kicks
+(ns live-coding.core)
+
 (definst kick1
   [freq       {:default 80 :min 50 :max 140 :step 1}
    env-ratio  {:default 3 :min 1.2 :max 8.0 :step 0.1}
